@@ -6,14 +6,13 @@ from fastapi import HTTPException, status
 class ExcelService:
     @staticmethod
     def process_sales_excel(file_bytes: bytes) -> List[Dict[str, Any]]:
-        """Procesa un archivo Excel binario de compras/ventas, filtrando
+        """Procesa un archivo Excel de Libro de Compras/Ventas aislando
 
-        y limpiando dinámicamente las hojas mensuales.
+        la sección de ventas mediante coordenadas físicas de la planilla.
         """
         processed_sheets = []
 
         try:
-            # Cargamos el archivo directamente desde memoria (Bytes)
             excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
         except Exception as e:
             raise HTTPException(
@@ -21,11 +20,7 @@ class ExcelService:
                 detail=f"Error al abrir el archivo Excel: {str(e)}"
             )
 
-        # Columnas objetivo que exige nuestro DTO
-        target_columns = ["FACT. N°", "CLIENTE", "RUT", "VALOR NETO", "IVA", "TOTAL FACTURA"]
-
         for sheet_name in excel_file.sheet_names:
-            # Filtro defensivo: Solo procesamos hojas mensuales
             sheet_name_upper = sheet_name.strip().upper()
             meses_validos = [
                 "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
@@ -33,92 +28,103 @@ class ExcelService:
             ]
             
             if not any(mes in sheet_name_upper for mes in meses_validos):
-                continue  # Salta automáticamente BALANCE ANUAL, SUELDOS, etc.
+                continue  # Ignora BALANCE ANUAL, SUELDOS, etc.
 
-            # Leer la hoja cruda sin cabecera
+            # Leer la hoja cruda completa sin procesar cabeceras
             df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
 
-            # 1. Localizar la fila de cabecera de forma dinámica
+            # -----------------------------------------------------------------
+            # 1. LOCALIZAR LA CABECERA Y EL MURO DE VENTAS
+            # -----------------------------------------------------------------
             header_row_idx = None
+            idx_cliente = None
+            
             for idx, row in df_raw.iterrows():
                 row_str = [str(cell).strip().upper() for cell in row]
-                if any("CLIENTE" in s for s in row_str) and any("VALOR NETO" in s for s in row_str):
+                if "CLIENTE" in row_str and "RUT" in row_str:
                     header_row_idx = idx
+                    idx_cliente = row_str.index("CLIENTE")
                     break
 
-            if header_row_idx is None:
+            # Si no encuentra las palabras clave en la hoja, la salta de forma segura
+            if header_row_idx is None or idx_cliente is None:
                 continue  
 
-            # 2. Recortar el DataFrame desde la cabecera identificada
+            # -----------------------------------------------------------------
+            # 2. AISLAR LA TABLA DE VENTAS (Corte por Coordenadas Físicas)
+            # -----------------------------------------------------------------
+            # Cortamos verticalmente desde la fila de la cabecera hacia abajo
             df_sales = df_raw.iloc[header_row_idx:].copy()
             
-            # Forzamos que los nombres de las columnas del DataFrame queden limpios en mayúsculas desde YA
-            df_sales.columns = [str(c).strip().upper() for c in df_sales.iloc[0]]
-            df_sales = df_sales.iloc[1:]  # Quitamos la fila que usamos como cabecera
+            # Cortamos horizontalmente: Nos quedamos SOLO desde la columna 'CLIENTE' hacia la izquierda y derecha de ventas
+            # Retrocedemos una columna para capturar obligatoriamente el 'FACT. N°' que está justo antes de 'CLIENTE'
+            inicio_ventas_col = max(0, idx_cliente - 1)
+            df_sales = df_sales.iloc[:, inicio_ventas_col:]
 
-            # =================================================================
-            # 3. Mapear y renombrar columnas existentes (Búsqueda Flexible Sin Duplicados)
-            # =================================================================
+            # Asignamos la primera fila recortada como los nuevos nombres de columnas
+            df_sales.columns = [str(c).strip().upper() for c in df_sales.iloc[0]]
+            df_sales = df_sales.iloc[1:]  # Eliminamos la fila de cabecera repetida
+
+            # -----------------------------------------------------------------
+            # 3. MAPEO INTELIGENTE UNITARIO
+            # -----------------------------------------------------------------
             column_mapping = {}
-            # Llevamos un registro de qué DTOs ya asignamos para no repetirlos
             assigned_targets = set()
 
             for c in df_sales.columns:
-                c_upper = str(c).strip().upper()
-                target = None
-                
-                if ("FACT" in c_upper or "N°" in c_upper or "NUMERO" in c_upper or "FOLIO" in c_upper) and "FACT. N°" not in assigned_targets:
-                    target = "FACT. N°"
-                elif ("CLIENTE" in c_upper or "RAZON" in c_upper) and "CLIENTE" not in assigned_targets:
-                    target = "CLIENTE"
-                elif ("RUT" in c_upper or "RECEPTOR" in c_upper) and "RUT" not in assigned_targets:
-                    target = "RUT"
-                elif "NETO" in c_upper and "VALOR NETO" not in assigned_targets:
-                    target = "VALOR NETO"
-                elif "IVA" in c_upper and "IVA" not in assigned_targets:
-                    target = "IVA"
-                elif "TOTAL" in c_upper and "TOTAL FACTURA" not in assigned_targets:
-                    target = "TOTAL FACTURA"
+                if ("FACT" in c or "N°" in c or "NUMERO" in c or "FOLIO" in c) and "FACT. N°" not in assigned_targets:
+                    column_mapping[c] = "FACT. N°"
+                    assigned_targets.add("FACT. N°")
+                elif ("CLIENTE" in c or "RAZON" in c) and "CLIENTE" not in assigned_targets:
+                    column_mapping[c] = "CLIENTE"
+                    assigned_targets.add("CLIENTE")
+                elif ("RUT" in c or "RECEPTOR" in c) and "RUT" not in assigned_targets:
+                    column_mapping[c] = "RUT"
+                    assigned_targets.add("RUT")
+                elif "NETO" in c and "VALOR NETO" not in assigned_targets:
+                    column_mapping[c] = "VALOR NETO"
+                    assigned_targets.add("VALOR NETO")
+                elif "IVA" in c and "IVA" not in assigned_targets:
+                    column_mapping[c] = "IVA"
+                    assigned_targets.add("IVA")
+                elif "TOTAL" in c and "TOTAL FACTURA" not in assigned_targets:
+                    column_mapping[c] = "TOTAL FACTURA"
+                    assigned_targets.add("TOTAL FACTURA")
 
-                if target:
-                    column_mapping[c] = target
-                    assigned_targets.add(target)
-
-            # Verificación de seguridad crítica
+            # Si por algún motivo el mapeo básico falla, protegemos la ejecución
             if "CLIENTE" not in column_mapping.values() or "RUT" not in column_mapping.values():
-                continue  
+                continue
 
-            # Filtramos el DataFrame con las columnas únicas encontradas
+            # Filtramos y renombramos de inmediato
             df_sales = df_sales[list(column_mapping.keys())]
-            # Las renombramos al estándar exacto que pide el DTO
             df_sales = df_sales.rename(columns=column_mapping)
 
-            # 4. Limpieza profunda de filas basura
+            # -----------------------------------------------------------------
+            # 4. LIMPIEZA PROFUNDA DE FILAS BASURA (Subtotales / Celdas vacías)
+            # -----------------------------------------------------------------
             df_sales = df_sales.dropna(subset=["CLIENTE", "RUT"], how="all")
-            
+
             for col in ["CLIENTE", "RUT"]:
                 df_sales = df_sales[
                     df_sales[col].astype(str).str.strip().str.upper().notna() & 
-                    (~df_sales[col].astype(str).str.strip().str.upper().isin(["NAN", "NONE", ""]))
+                    (~df_sales[col].astype(str).str.strip().str.upper().isin(["NAN", "NONE", "", "0", "0.0"]))
                 ]
 
+            # Quitamos filas que sumen subtotales o contengan cierres de mes
             df_sales = df_sales[
-                ~df_sales["CLIENTE"].astype(str).str.contains("TOTAL|SUB TOTAL|SUBTOTAL|SALDO", case=False, na=False)
+                ~df_sales["CLIENTE"].astype(str).str.contains("TOTAL|SUB TOTAL|SUBTOTAL|SALDO|ELECTRONICAS", case=False, na=False)
             ]
 
-            # 5. Formatear tipos de datos finales para cumplir con Pydantic
+            # -----------------------------------------------------------------
+            # 5. FORMATEO DE TIPOS DE DATOS FINALES PARA LA BASE DE DATOS
+            # -----------------------------------------------------------------
             if "FACT. N°" in df_sales.columns:
-                fact_numeric = pd.to_numeric(df_sales["FACT. N°"], errors='coerce').fillna(0)
-                df_sales["FACT. N°"] = fact_numeric.astype(int).astype(str)
-                df_sales["FACT. N°"] = df_sales["FACT. N°"].replace("0", "")
+                df_sales["FACT. N°"] = df_sales["FACT. N°"].astype(str).str.replace(".0", "", regex=False).str.strip()
             else:
-                df_sales["FACT. N°"] = ""
+                df_sales["FACT. N°"] = "0"
 
             for col in ["CLIENTE", "RUT"]:
-                if col in df_sales.columns:
-                    df_sales[col] = df_sales[col].astype(str).str.strip()
-                else:
-                    df_sales[col] = ""
+                df_sales[col] = df_sales[col].astype(str).str.strip()
 
             for col in ["VALOR NETO", "IVA", "TOTAL FACTURA"]:
                 if col in df_sales.columns:
@@ -126,13 +132,21 @@ class ExcelService:
                 else:
                     df_sales[col] = 0.0
 
-            # Convertir las filas a colecciones de diccionarios
-            records = df_sales.to_dict(orient="records")
+            # -----------------------------------------------------------------
+            # 6. CONVERSIÓN A DICCIONARIOS PARA PERSISTENCIA MASIVA
+            # -----------------------------------------------------------------
+            for _, row in df_sales.iterrows():
+                fact_str = str(row["FACT. N°"]).strip()
+                fact_numeric = int(fact_str) if fact_str.isdigit() else 0
 
-            processed_sheets.append({
-                "sheet_name": sheet_name,
-                "records_count": len(records),
-                "data": records
-            })
+                processed_sheets.append({
+                    "sheet_name": sheet_name,
+                    "fact_number": fact_numeric,
+                    "cliente": str(row["CLIENTE"]),
+                    "rut": str(row["RUT"]),
+                    "valor_neto": float(row["VALOR NETO"]),
+                    "iva": float(row["IVA"]),
+                    "total_factura": float(row["TOTAL FACTURA"])
+                })
 
         return processed_sheets

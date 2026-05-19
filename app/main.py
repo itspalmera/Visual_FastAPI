@@ -2,6 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 # Importamos el router desde tu estructura personalizada
 from app.Controller.router import router as api_router
+from app.Database.connection import engine, Base
+
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Mi API con Estructura .NET",

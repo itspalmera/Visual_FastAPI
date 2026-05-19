@@ -1,32 +1,30 @@
-from fastapi import APIRouter, UploadFile, File, status, HTTPException
-from typing import List
+from fastapi import APIRouter, UploadFile, File, Depends
+from sqlalchemy.orm import Session
 from app.Services.excel_service import ExcelService
-from app.DTOs.sales_dto import SheetProcessResponse
+from app.Models.sale import Sale
+from app.Database.connection import get_db  
 
-router = APIRouter(prefix="/sales", tags=["Procesamiento de Ventas"])
+router = APIRouter()
 
-@router.post(
-    "/upload-excel", 
-    response_model=List[SheetProcessResponse], 
-    status_code=status.HTTP_200_OK,
-    summary="Cargar y procesar libro Excel de ventas"
-)
-async def upload_sales_excel(file: UploadFile = File(..., description="Archivo .xlsx de Compras/Ventas")):
-    """
-    Sube un archivo Excel consolidado de compras y ventas. El sistema filtrará 
-    exclusivamente las hojas de los meses y extraerá los registros limpios.
-    """
-    # Validación básica de extensión (.csproj / FluentValidation style)
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Extensión de archivo no soportada. Debe ser .xlsx o .xls"
-        )
-    
-    # Leemos los bytes en memoria de forma asíncrona
+@router.post("/upload-excel")
+async def upload_sales_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
     file_bytes = await file.read()
     
-    # Invocamos la lógica de negocio
-    resultado = ExcelService.process_sales_excel(file_bytes)
+    # 1. Procesamos el Excel con los filtros inteligentes que armamos
+    ventas_procesadas = ExcelService.process_sales_excel(file_bytes)
     
-    return resultado
+    # 2. Mapeamos los diccionarios al modelo SQLAlchemy
+    nuevas_ventas = [Sale(**venta) for venta in ventas_procesadas]
+    
+    try:
+        # 3. Guardamos todo masivamente en la Base de Datos
+        db.bulk_save_objects(nuevas_ventas)
+        db.commit()
+        
+        return {
+            "status": "success",
+            "message": f"Se procesaron e indexaron exitosamente {len(nuevas_ventas)} registros históricos."
+        }
+    except Exception as e:
+        db.rollback()
+        return {"status": "error", "detail": str(e)}
