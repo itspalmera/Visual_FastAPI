@@ -1,8 +1,23 @@
-from fastapi import APIRouter
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.Controller.endpoints.sales import router as sales_router
+from app.Database.connection import engine, Base
 
-# Creamos el enrutador global
-router = APIRouter(prefix="/api")
+# Asegura la autocreación de la tabla sales_registry
+Base.metadata.create_all(bind=engine)
 
-# Inclusión de sub-módulos (puedes colgar más enrutadores aquí abajo)
-router.include_router(sales_router)
+app = FastAPI(
+    title="API Visualización Ventas",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Conectamos las rutas del sub-controlador
+app.include_router(sales_router)
