@@ -1,22 +1,23 @@
-from fastapi import APIRouter, status
-from pydantic import BaseModel
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.Controller.endpoints.sales import router as sales_router
+from app.Database.connection import engine, Base
 
-# Inicializamos el enrutador
-router = APIRouter(prefix="/api/v1", tags=["Endpoints Base"])
+# Asegura la autocreación de la tabla sales_registry
+Base.metadata.create_all(bind=engine)
 
-# Un DTO rápido de prueba usando Pydantic (Luego lo moverás a tu carpeta DTOs)
-class TestInput(BaseModel):
-    nombre: str
-    activo: bool
+app = FastAPI(
+    title="API Visualización Ventas",
+    version="1.0.0"
+)
 
-@router.get("/test")
-def get_test():
-    return {"message": "¡Conexión exitosa desde el Controller!"}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@router.post("/test", status_code=status.HTTP_201_CREATED)
-def post_test(data: TestInput):
-    return {
-        "status": "Recibido",
-        "tu_nombre": data.nombre,
-        "estado": "Usuario Activo" if data.activo else "Usuario Inactivo"
-    }
+# Conectamos las rutas del sub-controlador
+app.include_router(sales_router)
