@@ -9,7 +9,6 @@ from app.Models.sale import Sale
 
 router = APIRouter()
 
-# --- TU POST ACTUAL (Se mantiene) ---
 @router.post("/upload-excel", status_code=status.HTTP_200_OK)
 async def upload_sales_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not file.filename.endswith(('.xlsx', '.xls')):
@@ -29,14 +28,14 @@ async def upload_sales_excel(file: UploadFile = File(...), db: Session = Depends
     return {"status": "success", "message": f"Se indexaron {len(lista_ventas)} registros."}
 
 
-# --- NUEVO: GET ALL ---
+# --- GET ALL ---
 @router.get("/", response_model=List[SaleResponse], status_code=status.HTTP_200_OK)
 def get_all_sales(db: Session = Depends(get_db)):
     """Obtiene el listado histórico completo de la base de datos."""
     return ExcelService.get_all_sales(db)
 
 
-# --- NUEVO: GET CON FILTROS ---
+# --- GET CON FILTROS ---
 @router.get("/search", response_model=List[SaleResponse], status_code=status.HTTP_200_OK)
 def get_filtered_sales(
     cliente: Optional[str] = Query(None, description="Nombre o parte del cliente"),
@@ -47,7 +46,7 @@ def get_filtered_sales(
     return ExcelService.get_sales_with_filters(db, cliente=cliente, sheet_name=sheet_name)
 
 
-# --- NUEVO: GET BY ID ---
+# --- GET BY ID ---
 @router.get("/{sale_id}", response_model=SaleResponse, status_code=status.HTTP_200_OK)
 def get_sale_by_id(sale_id: int, db: Session = Depends(get_db)):
     """Recupera una factura única usando su ID de base de datos."""

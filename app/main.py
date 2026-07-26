@@ -1,17 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-# Corregido: controller en minúscula para coincidir con tu carpeta física
-from app.Controller.endpoints.sales import router as sales_router
+from app.Controller.router import router as api_router
 from app.Database.connection import engine, Base
 
-# Asegura la autocreación de la tabla sales_registry en SQLite
+# Creación de tablas en SQLite
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="API Visualización Ventas",
+    description="Backend modular para Dashboard de Ingresos y Clientes",
     version="1.0.0"
 )
 
+# Configuración de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,5 +21,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Conectamos las rutas de tu controlador de ventas
-app.include_router(sales_router)
+# Conectamos el router centralizado que agrupa todos los sub-controladores
+app.include_router(api_router)
+
+@app.get("/", tags=["Health Check"])
+def root():
+    return {"status": "Online", "message": "API corriendo correctamente"}
