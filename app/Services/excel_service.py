@@ -3,8 +3,10 @@ import pandas as pd
 from typing import List, Dict, Any, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.Models.sale import Sale
 from sqlalchemy import func
+
+from app.Models.sale import Sale
+
 
 class ExcelService:
     @staticmethod
@@ -29,18 +31,14 @@ class ExcelService:
             if not any(mes in sheet_name_upper for mes in meses_validos):
                 continue
 
-            # Leer la hoja completa en crudo
             df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
 
-            # 1. Localizar la fila de cabecera por coordenadas relativas a VENTAS
             header_row_idx = None
             idx_cliente = None
             
             for idx, row in df_raw.iterrows():
                 row_str = [str(cell).strip().upper() for cell in row]
-                # Usamos CLIENTE y TOTAL FACTURA que son marcas exclusivas del bloque de ventas
                 if "CLIENTE" in row_str or "TOTAL FACTURA" in row_str:
-                    # Buscamos en qué posición horizontal está la columna de clientes
                     indices_posibles = [i for i, s in enumerate(row_str) if "CLIENTE" in s]
                     if indices_posibles:
                         header_row_idx = idx
@@ -50,18 +48,13 @@ class ExcelService:
             if header_row_idx is None or idx_cliente is None:
                 continue  
 
-            # 2. Muro de contención: Cortamos horizontalmente descartando las compras (izquierda)
             df_sales = df_raw.iloc[header_row_idx:].copy()
-            
-            # Retrocedemos una posición para asegurar capturar 'FACT. N°' que está antes de 'CLIENTE'
             inicio_ventas_col = max(0, idx_cliente - 1)
             df_sales = df_sales.iloc[:, inicio_ventas_col:]
 
-            # Seteamos la nueva cabecera purificada de ventas
             df_sales.columns = [str(c).strip().upper() for c in df_sales.iloc[0]]
             df_sales = df_sales.iloc[1:]
 
-            # 3. Mapeo Flexible Unitario
             column_mapping = {}
             assigned_targets = set()
 
@@ -90,7 +83,6 @@ class ExcelService:
 
             df_sales = df_sales[list(column_mapping.keys())].rename(columns=column_mapping)
 
-            # 4. Limpieza profunda de acumuladores y celdas muertas del Excel
             df_sales = df_sales.dropna(subset=["CLIENTE"], how="all")
             
             if "RUT" in df_sales.columns:
@@ -105,7 +97,6 @@ class ExcelService:
                 ~df_sales["CLIENTE"].astype(str).str.contains("TOTAL|SUB TOTAL|SUBTOTAL|SALDO|ELECTRONICAS", case=False, na=False)
             ]
 
-            # 5. Formateo de tipos nativos
             if "FACT. N°" in df_sales.columns:
                 df_sales["FACT. N°"] = df_sales["FACT. N°"].astype(str).str.replace(".0", "", regex=False).str.strip()
             else:
@@ -120,7 +111,6 @@ class ExcelService:
                 else:
                     df_sales[col] = 0.0
 
-            # 6. Estructuración final
             for _, row in df_sales.iterrows():
                 fact_str = str(row["FACT. N°"]).strip()
                 fact_numeric = int(fact_str) if fact_str.isdigit() else 0
@@ -136,26 +126,109 @@ class ExcelService:
                 })
 
         return processed_sheets
-    
 
+    # -----------------------------------------------------------------
+    # CONSULTAS BÁSICAS CRUD
+    # -----------------------------------------------------------------
     @staticmethod
     def get_all_sales(db: Session) -> List[Sale]:
-        """Retorna todas las facturas de la base de datos."""
         return db.query(Sale).all()
 
     @staticmethod
     def get_sale_by_id(db: Session, sale_id: int) -> Optional[Sale]:
-        """Busca una factura específica por su ID primario."""
         return db.query(Sale).filter(Sale.id == sale_id).first()
 
     @staticmethod
     def get_sales_with_filters(db: Session, cliente: Optional[str] = None, sheet_name: Optional[str] = None) -> List[Sale]:
-        """Busca facturas por cliente (coincidencia parcial) o por mes exacto."""
         query = db.query(Sale)
-        
         if cliente:
             query = query.filter(Sale.cliente.ilike(f"%{cliente}%"))
         if sheet_name:
             query = query.filter(func.upper(Sale.sheet_name) == sheet_name.strip().upper())
-            
         return query.all()
+
+    # -----------------------------------------------------------------
+    # MÉTODOS DE ANALÍTICA PARA EL DASHBOARD (METRICS & CLIENTS)
+    # -----------------------------------------------------------------
+    @staticmethod
+    def get_monthly_flow_metrics(db: Session) -> List[Dict[str, Any]]:
+        """Calcula el Flujo de Caja por Mes (Idiom 1)."""
+        sales = db.query(Sale).all()
+        if not sales:
+            return []
+
+        meses = {}
+        for s in sales:
+            mes = s.sheet_name
+            if mes not in meses:
+                meses[mes] = {"ventas_brutas": 0.0, "notas_credito": 0.0}
+            meses[mes]["ventas_brutas"] += s.valor_neto
+
+        result = []
+        for mes, data in meses.items():
+            bruto = data["ventas_brutas"]
+            nc = data["notas_credito"]
+            result.append({
+                "sheet_name": mes,
+                "ventas_brutas": bruto,
+                "notas_credito": nc,
+                "recaudacion_real": bruto - nc
+            })
+        return result
+
+    @staticmethod
+    def get_client_risk_metrics(db: Session) -> List[Dict[str, Any]]:
+        """Calcula el Perfil de Riesgo por Cliente (Idiom 2)."""
+        sales = db.query(Sale).all()
+        if not sales:
+            return []
+
+        clientes = {}
+        for s in sales:
+            rut = s.rut
+            if rut not in clientes:
+                clientes[rut] = {
+                    "cliente": s.cliente,
+                    "facturas": 0,
+                    "ventas_totales": 0.0
+                }
+            clientes[rut]["facturas"] += 1
+            clientes[rut]["ventas_totales"] += s.valor_neto
+
+        result = []
+        for rut, data in clientes.items():
+            count = data["facturas"]
+            tot = data["ventas_totales"]
+            result.append({
+                "rut": rut,
+                "cliente": data["cliente"],
+                "recurrencia": count,
+                "ticket_promedio": tot / count if count > 0 else 0.0,
+                "ventas_totales": tot,
+                "tasa_riesgo": 0.0
+            })
+        return result
+
+    @staticmethod
+    def get_operational_density_metrics(db: Session) -> List[Dict[str, Any]]:
+        """Calcula la Densidad Operativa (Idiom 3)."""
+        sales = db.query(Sale).all()
+        if not sales:
+            return []
+
+        meses = {}
+        for s in sales:
+            mes = s.sheet_name
+            if mes not in meses:
+                meses[mes] = {"cantidad": 0, "total": 0.0}
+            meses[mes]["cantidad"] += 1
+            meses[mes]["total"] += s.valor_neto
+
+        return [
+            {
+                "sheet_name": mes,
+                "cantidad_facturas": data["cantidad"],
+                "total_recaudado": data["total"]
+            }
+            for mes, data in meses.items()
+        ]
