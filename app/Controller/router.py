@@ -1,23 +1,12 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter
 from app.Controller.endpoints.sales import router as sales_router
-from app.Database.connection import engine, Base
+from app.Controller.endpoints.clients import router as clients_router
+#from app.Controller.endpoints.metrics import router as metrics_router
 
-# Asegura la autocreación de la tabla sales_registry
-Base.metadata.create_all(bind=engine)
+# Router central de la API
+router = APIRouter()
 
-app = FastAPI(
-    title="API Visualización Ventas",
-    version="1.0.0"
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Conectamos las rutas del sub-controlador
-app.include_router(sales_router)
+# Registramos cada controlador con su prefijo y etiqueta para Swagger
+router.include_router(sales_router, prefix="/api/v1/sales", tags=["Gestión de Facturas"])
+router.include_router(clients_router, prefix="/api/v1/clients", tags=["Análisis de Clientes"])
+#router.include_router(metrics_router, prefix="/api/v1/metrics", tags=["Métricas Financieras"])
