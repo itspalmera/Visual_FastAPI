@@ -14,3 +14,4 @@ class Sale(Base):
     iva = Column(Float)
     total_factura = Column(Float)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    tipo_documento = Column(String, default="VENTA")  # "VENTA" o "NOTA_CREDITO"
