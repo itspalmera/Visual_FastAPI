@@ -1,22 +1,12 @@
-from fastapi import APIRouter, status
-from pydantic import BaseModel
+from fastapi import APIRouter
+from app.Controller.endpoints.sales import router as sales_router
+from app.Controller.endpoints.clients import router as clients_router
+from app.Controller.endpoints.metrics import router as metrics_router
 
-# Inicializamos el enrutador
-router = APIRouter(prefix="/api/v1", tags=["Endpoints Base"])
+# Router central de la API
+router = APIRouter()
 
-# Un DTO rápido de prueba usando Pydantic (Luego lo moverás a tu carpeta DTOs)
-class TestInput(BaseModel):
-    nombre: str
-    activo: bool
-
-@router.get("/test")
-def get_test():
-    return {"message": "¡Conexión exitosa desde el Controller!"}
-
-@router.post("/test", status_code=status.HTTP_201_CREATED)
-def post_test(data: TestInput):
-    return {
-        "status": "Recibido",
-        "tu_nombre": data.nombre,
-        "estado": "Usuario Activo" if data.activo else "Usuario Inactivo"
-    }
+# Registramos cada controlador con su prefijo y etiqueta para Swagger
+router.include_router(sales_router, prefix="/api/v1/sales", tags=["Gestión de Facturas"])
+router.include_router(clients_router, prefix="/api/v1/clients", tags=["Análisis de Clientes"])
+router.include_router(metrics_router, prefix="/api/v1/metrics", tags=["Métricas Financieras"])
