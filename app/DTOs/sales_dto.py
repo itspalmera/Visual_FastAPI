@@ -12,7 +12,6 @@ class SaleRecord(BaseModel):
     iva: Optional[float] = Field(None, alias="IVA")
     total_factura: Optional[float] = Field(None, alias="TOTAL FACTURA")
 
-    # Configuración limpia de Pydantic V2 (Basta con este diccionario)
     model_config = {"populate_by_name": True}
 
 
@@ -30,10 +29,10 @@ class SaleCreate(BaseModel):
     fact_number: int
     cliente: str
     rut: str
+    tipo_documento: str = "VENTA"
     valor_neto: float
     iva: float
     total_factura: float
-
 
 class SaleResponse(SaleCreate):
     id: int

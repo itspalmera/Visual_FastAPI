@@ -11,7 +11,7 @@ from app.Models.sale import Sale
 class ExcelService:
     @staticmethod
     def process_sales_excel(file_bytes: bytes) -> List[Dict[str, Any]]:
-        processed_sheets = []
+        processed_records = []
 
         try:
             excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
@@ -21,13 +21,13 @@ class ExcelService:
                 detail=f"Error al abrir el archivo Excel: {str(e)}"
             )
 
+        meses_validos = [
+            "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+            "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+        ]
+
         for sheet_name in excel_file.sheet_names:
             sheet_name_upper = sheet_name.strip().upper()
-            meses_validos = [
-                "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
-                "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
-            ]
-            
             if not any(mes in sheet_name_upper for mes in meses_validos):
                 continue
 
@@ -83,52 +83,43 @@ class ExcelService:
 
             df_sales = df_sales[list(column_mapping.keys())].rename(columns=column_mapping)
 
-            df_sales = df_sales.dropna(subset=["CLIENTE"], how="all")
-            
-            if "RUT" in df_sales.columns:
-                df_sales = df_sales[df_sales["RUT"].astype(str).str.strip().str.upper().notna()]
-                
-            df_sales = df_sales[
-                df_sales["CLIENTE"].astype(str).str.strip().str.upper().notna() & 
-                (~df_sales["CLIENTE"].astype(str).str.strip().str.upper().isin(["NAN", "NONE", "", "0", "0.0"]))
-            ]
-
-            df_sales = df_sales[
-                ~df_sales["CLIENTE"].astype(str).str.contains("TOTAL|SUB TOTAL|SUBTOTAL|SALDO|ELECTRONICAS", case=False, na=False)
-            ]
-
-            if "FACT. N°" in df_sales.columns:
-                df_sales["FACT. N°"] = df_sales["FACT. N°"].astype(str).str.replace(".0", "", regex=False).str.strip()
-            else:
-                df_sales["FACT. N°"] = "0"
-
-            if "RUT" not in df_sales.columns:
-                df_sales["RUT"] = ""
-
-            for col in ["VALOR NETO", "IVA", "TOTAL FACTURA"]:
-                if col in df_sales.columns:
-                    df_sales[col] = pd.to_numeric(df_sales[col], errors='coerce').fillna(0.0)
-                else:
-                    df_sales[col] = 0.0
+            current_doc_type = "VENTA"
 
             for _, row in df_sales.iterrows():
-                fact_str = str(row["FACT. N°"]).strip()
+                cliente_str = str(row["CLIENTE"]).strip().upper()
+
+                if "NOTA DE CREDITO" in cliente_str or "NOTAS DE CREDITO" in cliente_str:
+                    current_doc_type = "NOTA_CREDITO"
+                    continue
+
+                if cliente_str in ["NAN", "NONE", "", "0", "0.0"]:
+                    continue
+
+                if any(kw in cliente_str for kw in ["TOTAL", "SUB TOTAL", "SUBTOTAL", "SALDO", "ELECTRONICAS"]):
+                    continue
+
+                fact_str = str(row.get("FACT. N°", "0")).replace(".0", "").strip()
                 fact_numeric = int(fact_str) if fact_str.isdigit() else 0
 
-                processed_sheets.append({
+                val_neto = pd.to_numeric(row.get("VALOR NETO"), errors='coerce') or 0.0
+                val_iva = pd.to_numeric(row.get("IVA"), errors='coerce') or 0.0
+                val_total = pd.to_numeric(row.get("TOTAL FACTURA"), errors='coerce') or 0.0
+
+                processed_records.append({
                     "sheet_name": sheet_name,
                     "fact_number": fact_numeric,
                     "cliente": str(row["CLIENTE"]).strip(),
-                    "rut": str(row["RUT"]).strip(),
-                    "valor_neto": float(row["VALOR NETO"]),
-                    "iva": float(row["IVA"]),
-                    "total_factura": float(row["TOTAL FACTURA"])
+                    "rut": str(row.get("RUT", "")).strip(),
+                    "tipo_documento": current_doc_type,
+                    "valor_neto": float(val_neto),
+                    "iva": float(val_iva),
+                    "total_factura": float(val_total)
                 })
 
-        return processed_sheets
+        return processed_records
 
     # -----------------------------------------------------------------
-    # CONSULTAS BÁSICAS CRUD
+    # CONSULTAS Y FILTROS CRUD
     # -----------------------------------------------------------------
     @staticmethod
     def get_all_sales(db: Session) -> List[Sale]:
@@ -139,21 +130,34 @@ class ExcelService:
         return db.query(Sale).filter(Sale.id == sale_id).first()
 
     @staticmethod
-    def get_sales_with_filters(db: Session, cliente: Optional[str] = None, sheet_name: Optional[str] = None) -> List[Sale]:
+    def get_sales_with_filters(
+        db: Session, 
+        cliente: Optional[str] = None, 
+        sheet_name: Optional[str] = None,
+        min_neto: Optional[float] = None,
+        max_neto: Optional[float] = None
+    ) -> List[Sale]:
         query = db.query(Sale)
         if cliente:
             query = query.filter(Sale.cliente.ilike(f"%{cliente}%"))
         if sheet_name:
             query = query.filter(func.upper(Sale.sheet_name) == sheet_name.strip().upper())
+        if min_neto is not None:
+            query = query.filter(Sale.valor_neto >= min_neto)
+        if max_neto is not None:
+            query = query.filter(Sale.valor_neto <= max_neto)
         return query.all()
 
     # -----------------------------------------------------------------
-    # MÉTODOS DE ANALÍTICA PARA EL DASHBOARD (METRICS & CLIENTS)
+    # MÉTODOS DE ANALÍTICA (IDIOMS 1, 2 Y 3)
     # -----------------------------------------------------------------
     @staticmethod
-    def get_monthly_flow_metrics(db: Session) -> List[Dict[str, Any]]:
-        """Calcula el Flujo de Caja por Mes (Idiom 1)."""
-        sales = db.query(Sale).all()
+    def get_monthly_flow_metrics(
+        db: Session, 
+        min_neto: Optional[float] = None, 
+        max_neto: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        sales = ExcelService.get_sales_with_filters(db, min_neto=min_neto, max_neto=max_neto)
         if not sales:
             return []
 
@@ -162,7 +166,11 @@ class ExcelService:
             mes = s.sheet_name
             if mes not in meses:
                 meses[mes] = {"ventas_brutas": 0.0, "notas_credito": 0.0}
-            meses[mes]["ventas_brutas"] += s.valor_neto
+            
+            if s.tipo_documento == "NOTA_CREDITO":
+                meses[mes]["notas_credito"] += s.valor_neto
+            else:
+                meses[mes]["ventas_brutas"] += s.valor_neto
 
         result = []
         for mes, data in meses.items():
@@ -177,42 +185,58 @@ class ExcelService:
         return result
 
     @staticmethod
-    def get_client_risk_metrics(db: Session) -> List[Dict[str, Any]]:
-        """Calcula el Perfil de Riesgo por Cliente (Idiom 2)."""
-        sales = db.query(Sale).all()
+    def get_client_risk_metrics(
+        db: Session, 
+        min_neto: Optional[float] = None, 
+        max_neto: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        sales = ExcelService.get_sales_with_filters(db, min_neto=min_neto, max_neto=max_neto)
         if not sales:
             return []
 
         clientes = {}
         for s in sales:
-            rut = s.rut
+            rut = s.rut if s.rut else "SIN_RUT"
             if rut not in clientes:
                 clientes[rut] = {
                     "cliente": s.cliente,
-                    "facturas": 0,
-                    "ventas_totales": 0.0
+                    "recurrencia": 0,
+                    "ventas_brutas": 0.0,
+                    "monto_nc": 0.0
                 }
-            clientes[rut]["facturas"] += 1
-            clientes[rut]["ventas_totales"] += s.valor_neto
+            
+            if s.tipo_documento == "NOTA_CREDITO":
+                clientes[rut]["monto_nc"] += s.valor_neto
+            else:
+                clientes[rut]["recurrencia"] += 1
+                clientes[rut]["ventas_brutas"] += s.valor_neto
 
         result = []
         for rut, data in clientes.items():
-            count = data["facturas"]
-            tot = data["ventas_totales"]
+            count = data["recurrencia"]
+            ventas = data["ventas_brutas"]
+            nc = data["monto_nc"]
+            
+            tasa_riesgo = (nc / ventas * 100.0) if ventas > 0 else (100.0 if nc > 0 else 0.0)
+            ticket_promedio = (ventas / count) if count > 0 else 0.0
+
             result.append({
                 "rut": rut,
                 "cliente": data["cliente"],
                 "recurrencia": count,
-                "ticket_promedio": tot / count if count > 0 else 0.0,
-                "ventas_totales": tot,
-                "tasa_riesgo": 0.0
+                "ticket_promedio": ticket_promedio,
+                "ventas_totales": ventas,
+                "tasa_riesgo": round(tasa_riesgo, 2)
             })
         return result
 
     @staticmethod
-    def get_operational_density_metrics(db: Session) -> List[Dict[str, Any]]:
-        """Calcula la Densidad Operativa (Idiom 3)."""
-        sales = db.query(Sale).all()
+    def get_operational_density_metrics(
+        db: Session, 
+        min_neto: Optional[float] = None, 
+        max_neto: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        sales = ExcelService.get_sales_with_filters(db, min_neto=min_neto, max_neto=max_neto)
         if not sales:
             return []
 
@@ -220,15 +244,19 @@ class ExcelService:
         for s in sales:
             mes = s.sheet_name
             if mes not in meses:
-                meses[mes] = {"cantidad": 0, "total": 0.0}
-            meses[mes]["cantidad"] += 1
-            meses[mes]["total"] += s.valor_neto
+                meses[mes] = {"cantidad": 0, "neto_recaudado": 0.0}
+            
+            if s.tipo_documento == "VENTA":
+                meses[mes]["cantidad"] += 1
+                meses[mes]["neto_recaudado"] += s.valor_neto
+            else:
+                meses[mes]["neto_recaudado"] -= s.valor_neto
 
         return [
             {
                 "sheet_name": mes,
                 "cantidad_facturas": data["cantidad"],
-                "total_recaudado": data["total"]
+                "total_recaudado": data["neto_recaudado"]
             }
             for mes, data in meses.items()
         ]
