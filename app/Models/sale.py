@@ -1,17 +1,17 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime
-from sqlalchemy.sql import func
-from app.Database.connection import Base  # Tu configuración de base de datos
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, Float, Integer
+from app.Database.connection import Base
+
 
 class Sale(Base):
-    __tablename__ = "sales_registry"
+    __tablename__ = "sales"
 
-    id = Column(Integer, primary_key=True, index=True)
-    sheet_name = Column(String, index=True)       # Ejemplo: "ENERO", "FEBRERO"
-    fact_number = Column(Integer, index=True)     # Folio de la Factura
-    cliente = Column(String)
-    rut = Column(String)
-    valor_neto = Column(Float)
-    iva = Column(Float)
-    total_factura = Column(Float)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    tipo_documento = Column(String, default="VENTA")  # "VENTA" o "NOTA_CREDITO"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    sheet_name: Mapped[str] = mapped_column(String)
+    fact_number: Mapped[int] = mapped_column(Integer)
+    cliente: Mapped[str] = mapped_column(String)
+    rut: Mapped[str] = mapped_column(String)
+    tipo_documento: Mapped[str] = mapped_column(String)
+    valor_neto: Mapped[float] = mapped_column(Float, default=0.0)
+    iva: Mapped[float] = mapped_column(Float, default=0.0)
+    total_factura: Mapped[float] = mapped_column(Float, default=0.0)

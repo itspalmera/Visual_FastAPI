@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.Controller.router import router as api_router
-from app.Database.connection import engine, Base
 
-# Creación de tablas en SQLite
+from app.Database.connection import engine, Base
+from app.Models.sale import Sale  # Registra la tabla en Base.metadata
+from app.Controller.router import router as api_router
+
+# Crear las tablas en la base de datos si no existen
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
