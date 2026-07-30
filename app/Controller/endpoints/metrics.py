@@ -18,9 +18,15 @@ router = APIRouter()
 def get_monthly_flow(
     min_neto: Optional[float] = Query(None, description="Filtro mínimo de valor neto"),
     max_neto: Optional[float] = Query(None, description="Filtro máximo de valor neto"),
+    rut: Optional[str] = Query(None, description="Filtrar por RUT de cliente"),
+    segmentos: Optional[List[str]] = Query(None, description="Filtra por uno o múltiples segmentos"),
     db: Session = Depends(get_db)
 ):
-    return MetricsService.get_monthly_flow_metrics(db, min_neto=min_neto, max_neto=max_neto)
+    return MetricsService.get_monthly_flow_metrics(db, 
+                                                   min_neto=min_neto, 
+                                                   max_neto=max_neto, 
+                                                   rut=rut,
+                                                   segmentos=segmentos)
 
 
 @router.get(
@@ -32,6 +38,12 @@ def get_monthly_flow(
 def get_operational_density(
     min_neto: Optional[float] = Query(None, description="Filtro mínimo de valor neto"),
     max_neto: Optional[float] = Query(None, description="Filtro máximo de valor neto"),
+    rut: Optional[str] = Query(None, description="Filtrar por RUT de cliente"),
+    segmentos: Optional[List[str]] = Query(None, description="Filtra por uno o múltiples segmentos"),
     db: Session = Depends(get_db)
 ):
-    return MetricsService.get_operational_density_metrics(db, min_neto=min_neto, max_neto=max_neto)
+    return MetricsService.get_operational_density_metrics(db, 
+                                                          min_neto=min_neto, 
+                                                          max_neto=max_neto,
+                                                          rut=rut,
+                                                          segmentos=segmentos)

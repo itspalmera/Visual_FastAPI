@@ -111,6 +111,14 @@ class ExcelService:
                 if val_total == 0.0 and val_neto > 0:
                     val_total = val_neto + val_iva
 
+                # Lógica de negocio inferida para Segmentos
+                if val_total >= 15000000:
+                    segmento = "Grandes Proyectos"
+                elif val_total >= 5000000:
+                    segmento = "Servicios Comerciales"
+                else:
+                    segmento = "Mantenciones Ocasionales"
+
                 processed_records.append({
                     "sheet_name": sheet_name,
                     "fact_number": fact_numeric,
@@ -120,6 +128,7 @@ class ExcelService:
                     "valor_neto": val_neto,
                     "iva": val_iva,
                     "total_factura": val_total,
+                    "segmento": segmento,
                 })
 
         return processed_records

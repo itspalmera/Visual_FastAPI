@@ -15,3 +15,4 @@ class Sale(Base):
     valor_neto: Mapped[float] = mapped_column(Float, default=0.0)
     iva: Mapped[float] = mapped_column(Float, default=0.0)
     total_factura: Mapped[float] = mapped_column(Float, default=0.0)
+    segmento: Mapped[str] = mapped_column(String, default="Mantenciones Ocasionales")

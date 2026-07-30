@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
+
 # ==========================================
 # DTOs PARA EL POST (Procesamiento por Hojas)
 # ==========================================
@@ -33,6 +34,8 @@ class SaleCreate(BaseModel):
     valor_neto: float
     iva: float
     total_factura: float
+    segmento: str = "Mantenciones Ocasionales"
+
 
 class SaleResponse(SaleCreate):
     id: int

@@ -2,15 +2,25 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.Services.sales_service import SalesService
 
+# Diccionario auxiliar para garantizar que los gráficos rendericen los meses en orden
+MESES_ORDEN = {
+    "ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
+    "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12
+}
+
 
 class MetricsService:
     @staticmethod
     def get_monthly_flow_metrics(
         db: Session,
+        rut: Optional[str] = None,
         min_neto: Optional[float] = None,
         max_neto: Optional[float] = None,
+        segmentos: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        sales = SalesService.get_sales_with_filters(db, min_neto=min_neto, max_neto=max_neto)
+        sales = SalesService.get_sales_with_filters(
+            db, min_neto=min_neto, max_neto=max_neto, rut=rut, segmentos=segmentos
+        )
         if not sales:
             return []
 
@@ -27,7 +37,7 @@ class MetricsService:
             else:
                 meses[mes]["ventas_brutas"] += val_neto
 
-        return [
+        resultado = [
             {
                 "sheet_name": mes,
                 "ventas_brutas": data["ventas_brutas"],
@@ -36,24 +46,32 @@ class MetricsService:
             }
             for mes, data in meses.items()
         ]
+        
+        # Ordenamos cronológicamente
+        resultado.sort(key=lambda x: MESES_ORDEN.get(str(x["sheet_name"]).upper(), 99))
+        return resultado
 
     @staticmethod
     def get_client_risk_metrics(
         db: Session,
         min_neto: Optional[float] = None,
         max_neto: Optional[float] = None,
+        rut: Optional[str] = None,
+        segmentos: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        sales = SalesService.get_sales_with_filters(db, min_neto=min_neto, max_neto=max_neto)
+        sales = SalesService.get_sales_with_filters(
+            db, min_neto=min_neto, max_neto=max_neto, rut=rut, segmentos=segmentos
+        )
         if not sales:
             return []
 
         clientes: Dict[str, Dict[str, Any]] = {}
         for s in sales:
-            rut = str(s.rut) if s.rut else "SIN_RUT"
+            client_rut = str(s.rut) if s.rut else "SIN_RUT"
             val_neto = float(s.valor_neto or 0.0)
 
-            if rut not in clientes:
-                clientes[rut] = {
+            if client_rut not in clientes:
+                clientes[client_rut] = {
                     "cliente": str(s.cliente),
                     "recurrencia": 0,
                     "ventas_brutas": 0.0,
@@ -61,13 +79,13 @@ class MetricsService:
                 }
 
             if s.tipo_documento == "NOTA_CREDITO":
-                clientes[rut]["monto_nc"] = float(clientes[rut]["monto_nc"]) + val_neto
+                clientes[client_rut]["monto_nc"] += val_neto
             else:
-                clientes[rut]["recurrencia"] = int(clientes[rut]["recurrencia"]) + 1
-                clientes[rut]["ventas_brutas"] = float(clientes[rut]["ventas_brutas"]) + val_neto
+                clientes[client_rut]["recurrencia"] += 1
+                clientes[client_rut]["ventas_brutas"] += val_neto
 
         result = []
-        for rut, data in clientes.items():
+        for client_rut, data in clientes.items():
             count = int(data["recurrencia"])
             ventas = float(data["ventas_brutas"])
             nc = float(data["monto_nc"])
@@ -76,7 +94,7 @@ class MetricsService:
             ticket_promedio = (ventas / count) if count > 0 else 0.0
 
             result.append({
-                "rut": rut,
+                "rut": client_rut,
                 "cliente": data["cliente"],
                 "recurrencia": count,
                 "ticket_promedio": ticket_promedio,
@@ -90,8 +108,16 @@ class MetricsService:
         db: Session,
         min_neto: Optional[float] = None,
         max_neto: Optional[float] = None,
+        rut: Optional[str] = None,
+        segmentos: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        sales = SalesService.get_sales_with_filters(db, min_neto=min_neto, max_neto=max_neto)
+        sales = SalesService.get_sales_with_filters(
+            db, 
+            min_neto=min_neto, 
+            max_neto=max_neto, 
+            rut=rut, 
+            segmentos=segmentos
+        )
         if not sales:
             return []
 
@@ -104,12 +130,12 @@ class MetricsService:
                 meses[mes] = {"cantidad": 0, "neto_recaudado": 0.0}
 
             if s.tipo_documento == "VENTA":
-                meses[mes]["cantidad"] = int(meses[mes]["cantidad"]) + 1
-                meses[mes]["neto_recaudado"] = float(meses[mes]["neto_recaudado"]) + val_neto
+                meses[mes]["cantidad"] += 1
+                meses[mes]["neto_recaudado"] += val_neto
             else:
-                meses[mes]["neto_recaudado"] = float(meses[mes]["neto_recaudado"]) - val_neto
+                meses[mes]["neto_recaudado"] -= val_neto
 
-        return [
+        resultado = [
             {
                 "sheet_name": mes,
                 "cantidad_facturas": int(data["cantidad"]),
@@ -117,3 +143,7 @@ class MetricsService:
             }
             for mes, data in meses.items()
         ]
+        
+        # Ordenamos cronológicamente
+        resultado.sort(key=lambda x: MESES_ORDEN.get(str(x["sheet_name"]).upper(), 99))
+        return resultado

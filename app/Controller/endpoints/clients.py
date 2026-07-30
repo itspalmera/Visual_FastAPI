@@ -18,6 +18,12 @@ router = APIRouter()
 def get_client_risk_matrix(
     min_neto: Optional[float] = Query(None, description="Filtro mínimo de valor neto"),
     max_neto: Optional[float] = Query(None, description="Filtro máximo de valor neto"),
+    rut: Optional[str] = Query(None),
+    segmentos: Optional[List[str]] = Query(None),
     db: Session = Depends(get_db)
 ):
-    return MetricsService.get_client_risk_metrics(db, min_neto=min_neto, max_neto=max_neto)
+    return MetricsService.get_client_risk_metrics(db, 
+                                                  min_neto=min_neto, 
+                                                  max_neto=max_neto, 
+                                                  rut=rut, 
+                                                  segmentos=segmentos)
