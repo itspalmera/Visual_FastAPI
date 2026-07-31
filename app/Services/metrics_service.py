@@ -1,3 +1,11 @@
+"""
+Servicio de Cálculo de Métricas Analíticas y Financieras.
+
+Este módulo provee la lógica de negocio para procesar y consolidar la información
+de ventas almacenada en la base de datos, generando agregaciones estructuradas para
+diagramas de flujo mensual, matrices de perfil de riesgo de clientes y densidad operacional.
+"""
+
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.Services.sales_service import SalesService
@@ -10,6 +18,10 @@ MESES_ORDEN = {
 
 
 class MetricsService:
+    """
+    Servicio encargado de transformar y agregar registros de ventas en indicadores analíticos.
+    """
+
     @staticmethod
     def get_monthly_flow_metrics(
         db: Session,
@@ -18,12 +30,33 @@ class MetricsService:
         max_neto: Optional[float] = None,
         segmentos: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
+        """
+        Calcula las métricas de flujo de caja mensual (ventas brutas, notas de crédito y recaudación real).
+
+        Proceso:
+        1. Consulta las ventas filtradas a través de `SalesService`.
+        2. Agrupa los montos por mes (`sheet_name`) diferenciando entre ventas y notas de crédito.
+        3. Calcula la recaudación real (`ventas_brutas` - `notas_credito`).
+        4. Ordena el resultado de forma cronológica utilizando `MESES_ORDEN`.
+
+        Args:
+            db (Session): Sesión activa de SQLAlchemy.
+            rut (Optional[str]): Filtro opcional por RUT de cliente. Default: `None`.
+            min_neto (Optional[float]): Filtro opcional de valor neto mínimo. Default: `None`.
+            max_neto (Optional[float]): Filtro opcional de valor neto máximo. Default: `None`.
+            segmentos (Optional[List[str]]): Filtro opcional por lista de segmentos comerciales. Default: `None`.
+
+        Returns:
+            List[Dict[str, Any]]: Lista de diccionarios ordenada por mes con la estructura de `MonthlyFlowResponse`.
+        """
+        # Obtenemos los registros filtrados desde la capa de persistencia
         sales = SalesService.get_sales_with_filters(
             db, min_neto=min_neto, max_neto=max_neto, rut=rut, segmentos=segmentos
         )
         if not sales:
             return []
 
+        # Agregación por periodo/mes
         meses: Dict[str, Dict[str, float]] = {}
         for s in sales:
             mes = str(s.sheet_name)
@@ -37,6 +70,7 @@ class MetricsService:
             else:
                 meses[mes]["ventas_brutas"] += val_neto
 
+        # Construcción de la respuesta calculando la recaudación real
         resultado = [
             {
                 "sheet_name": mes,
@@ -47,7 +81,7 @@ class MetricsService:
             for mes, data in meses.items()
         ]
         
-        # Ordenamos cronológicamente
+        # Ordenamos cronológicamente según el diccionario auxiliar
         resultado.sort(key=lambda x: MESES_ORDEN.get(str(x["sheet_name"]).upper(), 99))
         return resultado
 
@@ -59,12 +93,32 @@ class MetricsService:
         rut: Optional[str] = None,
         segmentos: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
+        """
+        Calcula la matriz de perfil de riesgo y comportamiento comercial por cliente.
+
+        Proceso:
+        1. Consulta las ventas filtradas a través de `SalesService`.
+        2. Agrupa por RUT del cliente acumulando recurrencia (cantidad de facturas), ventas brutas y monto de notas de crédito.
+        3. Calcula el ticket promedio (`ventas_brutas` / `recurrencia`) y la tasa de riesgo (% de notas de crédito respecto al total).
+
+        Args:
+            db (Session): Sesión activa de SQLAlchemy.
+            min_neto (Optional[float]): Filtro opcional de valor neto mínimo. Default: `None`.
+            max_neto (Optional[float]): Filtro opcional de valor neto máximo. Default: `None`.
+            rut (Optional[str]): Filtro opcional por RUT de cliente. Default: `None`.
+            segmentos (Optional[List[str]]): Filtro opcional por lista de segmentos comerciales. Default: `None`.
+
+        Returns:
+            List[Dict[str, Any]]: Lista de diccionarios con la estructura de `ClientRiskProfileResponse`.
+        """
+        # Obtenemos los registros filtrados desde la capa de persistencia
         sales = SalesService.get_sales_with_filters(
             db, min_neto=min_neto, max_neto=max_neto, rut=rut, segmentos=segmentos
         )
         if not sales:
             return []
 
+        # Agregación por cliente (RUT)
         clientes: Dict[str, Dict[str, Any]] = {}
         for s in sales:
             client_rut = str(s.rut) if s.rut else "SIN_RUT"
@@ -84,6 +138,7 @@ class MetricsService:
                 clientes[client_rut]["recurrencia"] += 1
                 clientes[client_rut]["ventas_brutas"] += val_neto
 
+        # Cálculo de indicadores por cliente (tasa de riesgo y ticket promedio)
         result = []
         for client_rut, data in clientes.items():
             count = int(data["recurrencia"])
@@ -111,6 +166,25 @@ class MetricsService:
         rut: Optional[str] = None,
         segmentos: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
+        """
+        Calcula las métricas de densidad operativa (cantidad de facturas y total recaudado por periodo).
+
+        Proceso:
+        1. Consulta las ventas filtradas a través de `SalesService`.
+        2. Agrupa por mes (`sheet_name`) contando la cantidad de facturas emitidas y restando notas de crédito del neto acumulado.
+        3. Ordena el resultado cronológicamente mediante `MESES_ORDEN`.
+
+        Args:
+            db (Session): Sesión activa de SQLAlchemy.
+            min_neto (Optional[float]): Filtro opcional de valor neto mínimo. Default: `None`.
+            max_neto (Optional[float]): Filtro opcional de valor neto máximo. Default: `None`.
+            rut (Optional[str]): Filtro opcional por RUT de cliente. Default: `None`.
+            segmentos (Optional[List[str]]): Filtro opcional por lista de segmentos comerciales. Default: `None`.
+
+        Returns:
+            List[Dict[str, Any]]: Lista de diccionarios ordenada por mes con la estructura de `OperationalDensityResponse`.
+        """
+        # Obtenemos los registros filtrados desde la capa de persistencia
         sales = SalesService.get_sales_with_filters(
             db, 
             min_neto=min_neto, 
@@ -121,6 +195,7 @@ class MetricsService:
         if not sales:
             return []
 
+        # Agregación de cantidad de documentos y recaudación neta por mes
         meses: Dict[str, Dict[str, Any]] = {}
         for s in sales:
             mes = str(s.sheet_name)
@@ -135,6 +210,7 @@ class MetricsService:
             else:
                 meses[mes]["neto_recaudado"] -= val_neto
 
+        # Construcción de la respuesta estructurada
         resultado = [
             {
                 "sheet_name": mes,
