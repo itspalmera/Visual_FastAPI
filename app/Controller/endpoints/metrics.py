@@ -6,6 +6,7 @@ from app.Services.metrics_service import MetricsService
 from app.DTOs.metrics_dto import MonthlyFlowResponse, OperationalDensityResponse
 from app.Database.connection import get_db
 
+# Inicialización del router de FastAPI para los endpoints de métricas
 router = APIRouter()
 
 
@@ -22,6 +23,26 @@ def get_monthly_flow(
     segmentos: Optional[List[str]] = Query(None, description="Filtra por uno o múltiples segmentos"),
     db: Session = Depends(get_db)
 ):
+    """
+    Obtiene el desglose histórico y consolidado de las métricas de flujo mensual.
+
+    Calcula la evolución temporal de las operaciones y volumen financiero acumulado
+    mes a mes. Admite filtrado por montos netos, identificación del cliente (RUT) y
+    múltiples segmentos comerciales.
+
+    ### Parámetros de Consulta (Query Parameters):
+    - **min_neto** *(float, opcional)*: Límite inferior para filtrar por valor neto. Default: `None`.
+    - **max_neto** *(float, opcional)*: Límite superior para filtrar por valor neto. Default: `None`.
+    - **rut** *(str, opcional)*: Identificador único (RUT) de cliente. Default: `None`.
+    - **segmentos** *(List[str], opcional)*: Lista de segmentos comerciales a considerar. Default: `None`.
+
+    ### Inyección de Dependencias:
+    - **db** *(Session)*: Sesión activa de SQLAlchemy entregada por `get_db`.
+
+    ### Respuestas:
+    - **200 OK**: Retorna una lista de objetos `MonthlyFlowResponse` con las métricas del periodo.
+    """
+    # Consulta de métricas de flujo mensual delegada a la capa de servicios
     return MetricsService.get_monthly_flow_metrics(db, 
                                                    min_neto=min_neto, 
                                                    max_neto=max_neto, 
@@ -42,8 +63,27 @@ def get_operational_density(
     segmentos: Optional[List[str]] = Query(None, description="Filtra por uno o múltiples segmentos"),
     db: Session = Depends(get_db)
 ):
+    """
+    Obtiene los indicadores de densidad operacional y concentración de actividad.
+
+    Permite analizar la frecuencia e intensidad operativa para identificar patrones
+    de carga de trabajo o volumen transaccional según los filtros aplicados.
+
+    ### Parámetros de Consulta (Query Parameters):
+    - **min_neto** *(float, opcional)*: Límite inferior para filtrar por valor neto. Default: `None`.
+    - **max_neto** *(float, opcional)*: Límite superior para filtrar por valor neto. Default: `None`.
+    - **rut** *(str, opcional)*: Identificador único (RUT) de cliente. Default: `None`.
+    - **segmentos** *(List[str], opcional)*: Lista de segmentos comerciales a considerar. Default: `None`.
+
+    ### Inyección de Dependencias:
+    - **db** *(Session)*: Sesión activa de SQLAlchemy entregada por `get_db`.
+
+    ### Respuestas:
+    - **200 OK**: Retorna una lista de objetos `OperationalDensityResponse` con el cálculo de densidad.
+    """
+    # Consulta de densidad operacional delegada a la capa de servicios
     return MetricsService.get_operational_density_metrics(db, 
                                                           min_neto=min_neto, 
-                                                          max_neto=max_neto,
+                                                          max_neto=max_neto, 
                                                           rut=rut,
                                                           segmentos=segmentos)
