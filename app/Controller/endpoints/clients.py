@@ -19,8 +19,11 @@ router = APIRouter()
 def get_client_risk_matrix(
     min_neto: Optional[float] = Query(None, description="Filtro mínimo de valor neto"),
     max_neto: Optional[float] = Query(None, description="Filtro máximo de valor neto"),
+    rut: Optional[str] = Query(None),
+    segmentos: Optional[List[str]] = Query(None),
     db: Session = Depends(get_db)
 ):
+<<<<<<< HEAD
     """
     Obtiene la matriz de perfil de riesgo y métricas operativas de los clientes.
 
@@ -43,3 +46,10 @@ def get_client_risk_matrix(
     """
     # Delega la lógica de negocio y consulta de base de datos a la capa de servicios (MetricsService)
     return MetricsService.get_client_risk_metrics(db, min_neto=min_neto, max_neto=max_neto)
+=======
+    return MetricsService.get_client_risk_metrics(db, 
+                                                  min_neto=min_neto, 
+                                                  max_neto=max_neto, 
+                                                  rut=rut, 
+                                                  segmentos=segmentos)
+>>>>>>> 0f585b30d40740a88fec1c4e100d8e9673323b37
